@@ -26,6 +26,7 @@ import com.doplgangr.secrecy.R;
 import com.doplgangr.secrecy.Util;
 import com.doplgangr.secrecy.Views.DummyViews.HackyViewPager;
 import com.ipaulpro.afilechooser.utils.FileUtils;
+import com.path.android.jobqueue.JobManager;
 
 import org.androidannotations.annotations.AfterViews;
 import org.androidannotations.annotations.EActivity;
@@ -56,7 +57,7 @@ public class FilePhotoFragment extends FragmentActivity {
 
     @AfterViews
     void onCreate() {
-        context = this;
+         context = this;
         if (!EventBus.getDefault().isRegistered(this))
             EventBus.getDefault().register(this);
         final SamplePagerAdapter adapter = new SamplePagerAdapter(getSupportFragmentManager());
@@ -74,18 +75,9 @@ public class FilePhotoFragment extends FragmentActivity {
     }
 
     public void onEventMainThread(ImageLoadJob.ImageLoadDoneEvent event) {
-        Util.log("Recieving imageview and bm");
+        Util.log("Recieving imageview and bm for image " + event.mNum);
         if (event.bitmap == null && event.progressBar == null && event.imageView == null) {
-            Util.alert(context,
-                    context.getString(R.string.Error__out_of_memory),
-                    context.getString(R.string.Error__out_of_memory_message),
-                    new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialogInterface, int i) {
-                            context.finish();
-                        }
-                    },
-                    null);
+            Util.log("Low memory. 1");
             return;
         }
         try {
@@ -99,16 +91,7 @@ public class FilePhotoFragment extends FragmentActivity {
             event.imageView.setImageBitmap(Bitmap.createScaledBitmap(event.bitmap, (int) (ratio * bWidth)
                     , (int) (ratio * bHeight), false));
         } catch (OutOfMemoryError e) {
-            Util.alert(context,
-                    context.getString(R.string.Error__out_of_memory),
-                    context.getString(R.string.Error__out_of_memory_message),
-                    new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialogInterface, int i) {
-                            context.finish();
-                        }
-                    },
-                    null);
+            Util.log("Low memory. 2");
         }
         event.progressBar.setVisibility(View.GONE);
     }
@@ -143,18 +126,17 @@ public class FilePhotoFragment extends FragmentActivity {
 
         @Override
         public void destroyItem(ViewGroup container, int position, Object object) {
-            if (position >= getCount()) {
-                ((Fragment) object).onDestroy();
-                FragmentManager manager = ((Fragment) object).getFragmentManager();
-                FragmentTransaction trans = manager.beginTransaction();
-                trans.remove((Fragment) object);
-                trans.commit();
-            }
+            ((Fragment) object).onDestroy();
+            FragmentManager manager = ((Fragment) object).getFragmentManager();
+            FragmentTransaction trans = manager.beginTransaction();
+            trans.remove((Fragment) object);
+            trans.commit();
         }
 
         public static class PhotoFragment extends Fragment {
             int mNum;
             PhotoView photoView;
+            ImageLoadJob imageLoadJob;
 
             static PhotoFragment newInstance(int num) {
                 PhotoFragment f = new PhotoFragment();
@@ -180,19 +162,25 @@ public class FilePhotoFragment extends FragmentActivity {
             @Override
             public View onCreateView(LayoutInflater inflater, ViewGroup container,
                                      Bundle savedInstanceState) {
-                Util.log("onCreateView!!");
+                Util.log("onCreateView!! PhotoFragment");
                 final RelativeLayout relativeLayout = new RelativeLayout(container.getContext());
                 final File file = files.get(mNum);
                 final PhotoView photoView = new PhotoView(container.getContext());
                 this.photoView = photoView;
                 relativeLayout.addView(photoView, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-                photoView.setImageBitmap(file.getThumb(150));
+                if (photoView.getViewTreeObserver().isAlive()){
+                    Bitmap bm = file.getThumb(150);
+                    if (bm != null && !bm.isRecycled()) {
+                        photoView.setImageBitmap(file.getThumb(150));
+                    }
+                }
                 RelativeLayout.LayoutParams layoutParams = new RelativeLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
                 layoutParams.addRule(RelativeLayout.CENTER_IN_PARENT, RelativeLayout.TRUE);
                 final ProgressBar pBar = new ProgressBar(container.getContext());
                 pBar.setIndeterminate(false);
                 relativeLayout.addView(pBar, layoutParams);
-                CustomApp.jobManager.addJobInBackground(new ImageLoadJob(mNum, file, photoView, pBar));
+                imageLoadJob = new ImageLoadJob(mNum, file, photoView, pBar);
+                CustomApp.jobManager.addJobInBackground(imageLoadJob);
                 return relativeLayout;
             }
 
@@ -201,7 +189,12 @@ public class FilePhotoFragment extends FragmentActivity {
                 Util.log("onDestroy!!");
                 if (photoView != null) {
                     BitmapDrawable bd = (BitmapDrawable) photoView.getDrawable();
-                    bd.getBitmap().recycle();
+                    if (bd != null) {
+                        bd.getBitmap().recycle();
+                    }
+                }
+                if (imageLoadJob != null){
+                    imageLoadJob.cancel();
                 }
                 super.onDestroy();
             }

@@ -22,6 +22,7 @@ public class ImageLoadJob extends Job {
     private final File file;
     private final ProgressBar pBar;
     private final Integer mNum;
+    private boolean canceled = false;
 
     public ImageLoadJob(Integer mNum, File file, PhotoView imageView, ProgressBar pBar) {
         super(new Params(PRIORITY));
@@ -29,6 +30,7 @@ public class ImageLoadJob extends Job {
         this.file = file;
         this.imageView = imageView;
         this.pBar = pBar;
+
     }
 
     @Override
@@ -38,6 +40,7 @@ public class ImageLoadJob extends Job {
 
     @Override
     public void onRun() throws Throwable {
+        if (canceled) { return; }
         CipherInputStream imageStream =
                 file.readStream(new CryptStateListener() {
                     @Override
@@ -56,13 +59,16 @@ public class ImageLoadJob extends Job {
                     public void Finished() {
                     }
                 });
+        if (canceled) { return; }
         //File specified is not invalid
         if (imageStream != null) {
             //Decode image size
             byte[] bytes = IOUtils.toByteArray(imageStream);
-            try {
+             try {
+                if (canceled) { return; }
                 Bitmap bm = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
                 bytes = null;
+                if (canceled) { return; }
                 EventBus.getDefault().post(new ImageLoadDoneEvent(mNum, imageView, bm, pBar));
             } catch (OutOfMemoryError e) {
                 EventBus.getDefault().post(new ImageLoadDoneEvent(mNum, null, null, null));
@@ -70,9 +76,13 @@ public class ImageLoadJob extends Job {
         }
     }
 
+    public void cancel() {
+        this.canceled = true;
+    }
+
     @Override
     protected void onCancel() {
-
+        this.canceled = true;
     }
 
     @Override
